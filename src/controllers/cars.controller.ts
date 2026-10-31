@@ -5,10 +5,11 @@ import { prisma } from '../lib/prisma';
 import { HttpError } from '../middleware/error';
 
 const createCarSchema = z.object({
-  vin: z.string().min(5).max(17).optional(),
   make: z.string().min(1),
   model: z.string().min(1),
-  year: z.number().int().min(1900).max(2100).optional(),
+  vin: z.string().min(11).max(17).optional(),
+  year: z.coerce.number().int().min(1900).max(2100).optional(),
+  color: z.string().min(1).optional(),
   nickname: z.string().min(1).optional(),
 });
 
@@ -31,11 +32,16 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
     const data = createCarSchema.parse(req.body);
     const car = await prisma.car.create({
       data: {
-        ...data,
+        make: data.make,
+        model: data.model,
         vin: data.vin?.toUpperCase(),
+        year: data.year,
+        color: data.color,
+        nickname: data.nickname,
         userId: req.user!.id,
       },
     });
+    // car содержит id, userId и все введённые поля
     res.status(201).json({ car });
   } catch (err) {
     next(err);

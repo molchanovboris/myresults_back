@@ -1,3 +1,5 @@
+import path from 'path';
+
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -9,4 +11,6 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
   resendApiKey: process.env.RESEND_API_KEY ?? '',
   mailFrom: process.env.MAIL_FROM ?? 'My Results <noreply@example.com>',
+  autoDevApiKey: process.env.AUTODEV_API_KEY ?? '',
+  uploadsDir: process.env.UPLOADS_DIR ?? path.join(process.cwd(), 'uploads'),
 };

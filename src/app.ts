@@ -1,15 +1,20 @@
 import cors from 'cors';
 import express from 'express';
 
+import { config } from './lib/config';
+import { ensureDir } from './lib/uploads';
 import { errorHandler } from './middleware/error';
 import { authRouter } from './routes/auth.router';
 import { carsRouter } from './routes/cars.router';
 import { catalogRouter } from './routes/catalog.router';
 
+ensureDir(config.uploadsDir);
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(config.uploadsDir));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true });

@@ -41,12 +41,62 @@ model Car {
   make      String
   model     String
   year      Int?
+  color     String?
   nickname  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  services  ServiceRecord[]
+  photos    CarPhoto[]
+
   @@index([userId])
+}
+
+model CarPhoto {
+  id           String   @id @default(cuid())
+  carId        String
+  car          Car      @relation(fields: [carId], references: [id], onDelete: Cascade)
+
+  filename     String
+  originalName String?
+  mimeType     String
+  size         Int
+  caption      String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([carId])
+  @@index([carId, createdAt])
+}
+
+enum ServiceStatus {
+  planned
+  completed
+}
+
+model ServiceRecord {
+  id                   String        @id @default(cuid())
+  carId                String
+  car                  Car           @relation(fields: [carId], references: [id], onDelete: Cascade)
+
+  status               ServiceStatus @default(completed)
+  title                String
+  recommendedMileage   Int?
+  performedAt          DateTime?
+  mileage              Int?
+  cost                 Decimal?      @db.Decimal(12, 2)
+  workshop             String?
+  category             String?
+  notes                String?
+
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([carId])
+  @@index([carId, status])
+  @@index([carId, performedAt])
 }
 
 model VehicleCache {

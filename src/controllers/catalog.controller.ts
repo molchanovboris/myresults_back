@@ -1,7 +1,8 @@
 import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 
-import { decodeVin, getMakes, getModels } from '../lib/nhtsa';
+import { decodeVin } from '../lib/autodev';
+import { getMakes, getModels } from '../lib/nhtsa';
 
 const modelsQuerySchema = z.object({
   make: z.string().min(1),
@@ -28,7 +29,12 @@ export async function listModels(req: Request, res: Response, next: NextFunction
 
 export async function decode(req: Request, res: Response, next: NextFunction) {
   try {
-    const vin = z.string().min(5).max(17).parse(req.params.vin);
+    const vin = z
+      .string()
+      .min(11)
+      .max(17)
+      .regex(/^[A-HJ-NPR-Z0-9*]+$/i)
+      .parse(req.params.vin);
     const data = await decodeVin(vin);
     res.json(data);
   } catch (err) {
