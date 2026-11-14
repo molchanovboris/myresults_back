@@ -26,7 +26,7 @@ export async function fetchStockCarImage(input: {
     make: input.make,
     model: input.model,
     year: String(input.year),
-    view: 'front-3-4',
+    view: 'side-right',
     format: 'webp',
     size: 'medium',
   });
