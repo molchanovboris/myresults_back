@@ -16,6 +16,7 @@ const createCarSchema = z.object({
   year: z.coerce.number().int().min(1900).max(2100).optional(),
   color: z.string().min(1).optional(),
   nickname: z.string().min(1).optional(),
+  mileage: z.coerce.number().int().min(0),
 });
 
 const updateCarSchema = createCarSchema.partial();
@@ -43,6 +44,7 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
         year: data.year,
         color: data.color,
         nickname: data.nickname,
+        mileage: data.mileage,
         userId: req.user!.id,
       },
     });
@@ -108,15 +110,33 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
 export async function getCar(req: Request, res: Response, next: NextFunction) {
   try {
     const id = z.string().min(1).parse(req.params.id);
-    const car = await prisma.car.findFirst({
+    const found = await prisma.car.findFirst({
       where: { id, userId: req.user!.id },
+      include: {
+        photos: { orderBy: { createdAt: 'desc' } },
+      },
     });
 
-    if (!car) {
+    if (!found) {
       throw new HttpError(404, 'Car not found');
     }
 
-    res.json({ car });
+    const { photos, ...car } = found;
+
+    res.json({
+      car,
+      photos: photos.map((photo) => ({
+        id: photo.id,
+        carId: photo.carId,
+        caption: photo.caption,
+        mimeType: photo.mimeType,
+        size: photo.size,
+        originalName: photo.originalName,
+        url: photoPublicUrl(photo.carId, photo.filename),
+        createdAt: photo.createdAt,
+        updatedAt: photo.updatedAt,
+      })),
+    });
   } catch (err) {
     next(err);
   }

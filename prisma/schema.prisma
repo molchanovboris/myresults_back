@@ -43,6 +43,7 @@ model Car {
   year      Int?
   color     String?
   nickname  String?
+  mileage   Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
