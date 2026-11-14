@@ -1,7 +1,12 @@
+import fs from 'fs/promises';
+
 import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 
+import { fetchStockCarImage } from '../lib/carimage';
+import { createId } from '../lib/id';
 import { prisma } from '../lib/prisma';
+import { carUploadsDir, ensureDir, photoAbsolutePath, photoPublicUrl } from '../lib/uploads';
 import { HttpError } from '../middleware/error';
 
 const createCarSchema = z.object({
@@ -41,8 +46,60 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
         userId: req.user!.id,
       },
     });
-    // car содержит id, userId и все введённые поля
-    res.status(201).json({ car });
+
+    let photos: Array<{
+      id: string;
+      carId: string;
+      caption: string | null;
+      mimeType: string;
+      size: number;
+      originalName: string | null;
+      url: string;
+      createdAt: Date;
+      updatedAt: Date;
+    }> = [];
+
+    if (car.year != null) {
+      const stock = await fetchStockCarImage({
+        make: car.make,
+        model: car.model,
+        year: car.year,
+        color: car.color,
+      });
+
+      if (stock) {
+        const filename = `${createId()}${stock.extension}`;
+        ensureDir(carUploadsDir(car.id));
+        await fs.writeFile(photoAbsolutePath(car.id, filename), stock.buffer);
+
+        const photo = await prisma.carPhoto.create({
+          data: {
+            carId: car.id,
+            filename,
+            originalName: `${car.year}-${car.make}-${car.model}${stock.extension}`,
+            mimeType: stock.mimeType,
+            size: stock.buffer.length,
+            caption: 'Stock preview',
+          },
+        });
+
+        photos = [
+          {
+            id: photo.id,
+            carId: photo.carId,
+            caption: photo.caption,
+            mimeType: photo.mimeType,
+            size: photo.size,
+            originalName: photo.originalName,
+            url: photoPublicUrl(photo.carId, photo.filename),
+            createdAt: photo.createdAt,
+            updatedAt: photo.updatedAt,
+          },
+        ];
+      }
+    }
+
+    res.status(201).json({ car, photos });
   } catch (err) {
     next(err);
   }
@@ -50,8 +107,9 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
 
 export async function getCar(req: Request, res: Response, next: NextFunction) {
   try {
+    const id = z.string().min(1).parse(req.params.id);
     const car = await prisma.car.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id, userId: req.user!.id },
     });
 
     if (!car) {
@@ -66,9 +124,10 @@ export async function getCar(req: Request, res: Response, next: NextFunction) {
 
 export async function updateCar(req: Request, res: Response, next: NextFunction) {
   try {
+    const id = z.string().min(1).parse(req.params.id);
     const data = updateCarSchema.parse(req.body);
     const existing = await prisma.car.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id, userId: req.user!.id },
     });
 
     if (!existing) {
@@ -91,8 +150,9 @@ export async function updateCar(req: Request, res: Response, next: NextFunction)
 
 export async function deleteCar(req: Request, res: Response, next: NextFunction) {
   try {
+    const id = z.string().min(1).parse(req.params.id);
     const existing = await prisma.car.findFirst({
-      where: { id: req.params.id, userId: req.user!.id },
+      where: { id, userId: req.user!.id },
     });
 
     if (!existing) {
