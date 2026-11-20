@@ -77,16 +77,23 @@ enum ServiceStatus {
   completed
 }
 
+enum ServiceKind {
+  maintenance
+  repair
+}
+
 model ServiceRecord {
   id                   String        @id @default(cuid())
   carId                String
   car                  Car           @relation(fields: [carId], references: [id], onDelete: Cascade)
 
   status               ServiceStatus @default(completed)
+  kind                 ServiceKind?
   title                String
   recommendedMileage   Int?
   performedAt          DateTime?
   mileage              Int?
+  laborCost            Decimal?      @db.Decimal(12, 2)
   cost                 Decimal?      @db.Decimal(12, 2)
   workshop             String?
   category             String?
@@ -95,9 +102,26 @@ model ServiceRecord {
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
+  items                ServiceItem[]
+
   @@index([carId])
   @@index([carId, status])
   @@index([carId, performedAt])
+}
+
+model ServiceItem {
+  id        String        @id @default(cuid())
+  serviceId String
+  service   ServiceRecord @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  name      String
+  quantity  Int
+  price     Decimal       @db.Decimal(12, 2)
+  position  Int
+
+  createdAt DateTime      @default(now())
+
+  @@index([serviceId])
 }
 
 model VehicleCache {

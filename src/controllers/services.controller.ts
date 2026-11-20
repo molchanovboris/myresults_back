@@ -4,30 +4,37 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { HttpError } from '../middleware/error';
 
-const optionalExtras = {
-  workshop: z.string().min(1).optional(),
-  category: z.string().min(1).optional(),
-  notes: z.string().min(1).optional(),
-};
+const serviceItemSchema = z.object({
+  name: z.string().trim().min(1).max(500),
+  quantity: z.coerce.number().int().min(1).max(20),
+  price: z.coerce.number().min(0),
+});
 
-const createServiceSchema = z.discriminatedUnion('status', [
-  z.object({
-    status: z.literal('planned'),
-    title: z.string().min(1),
-    recommendedMileage: z.coerce.number().int().min(0),
-    performedAt: z.coerce.date().optional(),
-    ...optionalExtras,
-  }),
-  z.object({
-    status: z.literal('completed'),
-    title: z.string().min(1),
-    recommendedMileage: z.coerce.number().int().min(0).optional(),
-    performedAt: z.coerce.date(),
+const createServiceSchema = z
+  .object({
+    kind: z.enum(['maintenance', 'repair']),
     mileage: z.coerce.number().int().min(0),
-    cost: z.coerce.number().min(0),
-    ...optionalExtras,
-  }),
-]);
+    laborCost: z.coerce.number().min(0),
+    repair: z.string().trim().min(1).max(200).optional(),
+    items: z.array(serviceItemSchema).min(1),
+  })
+  .superRefine((data, ctx) => {
+    if (data.kind === 'repair' && !data.repair) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['repair'],
+        message: 'Describe what was repaired',
+      });
+    }
+  });
+
+function serviceTitle(kind: 'maintenance' | 'repair', mileage: number, repair?: string) {
+  if (kind === 'maintenance') {
+    return `Service at ${new Intl.NumberFormat('en-US').format(mileage)} km`;
+  }
+
+  return `Repair ${repair}`;
+}
 
 const updateServiceSchema = z
   .object({
@@ -71,6 +78,20 @@ const listQuerySchema = z.object({
   status: z.enum(['planned', 'completed', 'all']).default('all'),
 });
 
+function serializeService<T extends { cost: unknown; laborCost?: unknown; items?: { price: unknown }[] }>(
+  service: T
+) {
+  return {
+    ...service,
+    cost: service.cost == null ? null : toNumber(service.cost),
+    laborCost: service.laborCost == null ? null : toNumber(service.laborCost),
+    items: service.items?.map((item) => ({
+      ...item,
+      price: toNumber(item.price),
+    })),
+  };
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return Number(value);
@@ -103,11 +124,12 @@ export async function listServices(req: Request, res: Response, next: NextFuncti
         carId,
         ...(status === 'all' ? {} : { status }),
       },
-      orderBy: [{ performedAt: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ mileage: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }],
       select: {
         id: true,
         status: true,
         title: true,
+        kind: true,
         recommendedMileage: true,
         cost: true,
         mileage: true,
@@ -119,6 +141,7 @@ export async function listServices(req: Request, res: Response, next: NextFuncti
       id: record.id,
       status: record.status,
       title: record.title,
+      kind: record.kind,
       recommendedMileage: record.recommendedMileage,
       cost: record.cost == null ? null : toNumber(record.cost),
       mileage: record.mileage,
@@ -127,7 +150,10 @@ export async function listServices(req: Request, res: Response, next: NextFuncti
 
     const completed = services.filter((record) => record.status === 'completed');
     const totalCost = completed.reduce((sum, record) => sum + (record.cost ?? 0), 0);
-    const latestMileage = completed.at(-1)?.mileage ?? null;
+    const latestMileage = completed.reduce<number | null>((max, record) => {
+      if (record.mileage == null) return max;
+      return max == null || record.mileage > max ? record.mileage : max;
+    }, null);
 
     res.json({ services, totalCost, latestMileage });
   } catch (err) {
@@ -140,46 +166,35 @@ export async function createService(req: Request, res: Response, next: NextFunct
     const carId = z.string().min(1).parse(req.params.carId);
     await getOwnedCar(carId, req.user!.id);
 
-    // Если status не передан — считаем planned
-    const body = {
-      status: 'planned',
-      ...req.body,
-    };
-    const data = createServiceSchema.parse(body);
-
-    if (data.status === 'completed') {
-      const service = await prisma.serviceRecord.create({
-        data: {
-          carId,
-          status: 'completed',
-          title: data.title,
-          recommendedMileage: data.recommendedMileage,
-          performedAt: data.performedAt,
-          mileage: data.mileage,
-          cost: data.cost,
-          workshop: data.workshop,
-          category: data.category,
-          notes: data.notes,
-        },
-      });
-      res.status(201).json({ service });
-      return;
-    }
+    const data = createServiceSchema.parse(req.body);
+    const title = serviceTitle(data.kind, data.mileage, data.repair);
+    const items = data.items.map((item, position) => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      position,
+    }));
+    const partsTotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const totalCost = data.laborCost + partsTotal;
 
     const service = await prisma.serviceRecord.create({
       data: {
         carId,
-        status: 'planned',
-        title: data.title,
-        recommendedMileage: data.recommendedMileage,
-        performedAt: data.performedAt,
-        workshop: data.workshop,
-        category: data.category,
-        notes: data.notes,
+        status: 'completed',
+        kind: data.kind,
+        title,
+        mileage: data.mileage,
+        laborCost: data.laborCost,
+        cost: totalCost,
+        recommendedMileage: data.kind === 'maintenance' ? data.mileage : undefined,
+        performedAt: new Date(),
+        notes: data.kind === 'repair' ? data.repair : undefined,
+        items: { create: items },
       },
+      include: { items: { orderBy: { position: 'asc' } } },
     });
 
-    res.status(201).json({ service });
+    res.status(201).json({ service: serializeService(service) });
   } catch (err) {
     next(err);
   }
@@ -193,13 +208,14 @@ export async function getService(req: Request, res: Response, next: NextFunction
 
     const service = await prisma.serviceRecord.findFirst({
       where: { id: serviceId, carId },
+      include: { items: { orderBy: { position: 'asc' } } },
     });
 
     if (!service) {
       throw new HttpError(404, 'Service record not found');
     }
 
-    res.json({ service });
+    res.json({ service: serializeService(service) });
   } catch (err) {
     next(err);
   }
@@ -217,6 +233,10 @@ export async function updateService(req: Request, res: Response, next: NextFunct
 
     if (!existing) {
       throw new HttpError(404, 'Service record not found');
+    }
+
+    if (req.body != null && typeof req.body === 'object' && 'items' in req.body) {
+      throw new HttpError(400, 'Service items cannot be changed');
     }
 
     const data = updateServiceSchema.parse(req.body);
