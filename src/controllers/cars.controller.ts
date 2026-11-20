@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { fetchStockCarImage } from '../lib/carimage';
 import { createId } from '../lib/id';
 import { prisma } from '../lib/prisma';
+import type { CarDetailsResponse, CarListResponse, CarPhotoResponse, CarResponse } from '../types';
 import { carUploadsDir, ensureDir, photoAbsolutePath, photoPublicUrl } from '../lib/uploads';
 import { HttpError } from '../middleware/error';
 
@@ -34,7 +35,8 @@ export async function listCars(req: Request, res: Response, next: NextFunction) 
       where: { userId: req.user!.id },
       orderBy: { createdAt: 'desc' },
     });
-    res.json({ cars });
+    const body: CarListResponse = { cars };
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -56,17 +58,7 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
       },
     });
 
-    let photos: Array<{
-      id: string;
-      carId: string;
-      caption: string | null;
-      mimeType: string;
-      size: number;
-      originalName: string | null;
-      url: string;
-      createdAt: Date;
-      updatedAt: Date;
-    }> = [];
+    let photos: CarPhotoResponse[] = [];
 
     if (car.year != null) {
       const stock = await fetchStockCarImage({
@@ -108,7 +100,8 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
       }
     }
 
-    res.status(201).json({ car, photos });
+    const body: CarDetailsResponse = { car, photos };
+    res.status(201).json(body);
   } catch (err) {
     next(err);
   }
@@ -130,7 +123,7 @@ export async function getCar(req: Request, res: Response, next: NextFunction) {
 
     const { photos, ...car } = found;
 
-    res.json({
+    const body: CarDetailsResponse = {
       car,
       photos: photos.map((photo) => ({
         id: photo.id,
@@ -143,7 +136,8 @@ export async function getCar(req: Request, res: Response, next: NextFunction) {
         createdAt: photo.createdAt,
         updatedAt: photo.updatedAt,
       })),
-    });
+    };
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -174,7 +168,8 @@ export async function updateCar(req: Request, res: Response, next: NextFunction)
       data,
     });
 
-    res.json({ car });
+    const body: CarResponse = { car };
+    res.json(body);
   } catch (err) {
     next(err);
   }

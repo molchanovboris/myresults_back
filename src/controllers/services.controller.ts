@@ -1,8 +1,15 @@
+import type { ServiceItem, ServiceRecord } from '@prisma/client';
 import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 
 import { prisma } from '../lib/prisma';
 import { HttpError } from '../middleware/error';
+import type {
+  ServiceDetailsResponse,
+  ServiceListResponse,
+  ServiceRecordResponse,
+  ServiceResponse,
+} from '../types';
 
 const serviceItemSchema = z.object({
   name: z.string().trim().min(1).max(500),
@@ -78,16 +85,31 @@ const listQuerySchema = z.object({
   status: z.enum(['planned', 'completed', 'all']).default('all'),
 });
 
-function serializeService<T extends { cost: unknown; laborCost?: unknown; items?: { price: unknown }[] }>(
-  service: T
-) {
+function serializeService(service: ServiceRecord & { items: ServiceItem[] }): ServiceRecordResponse {
   return {
-    ...service,
-    cost: service.cost == null ? null : toNumber(service.cost),
+    id: service.id,
+    carId: service.carId,
+    status: service.status,
+    kind: service.kind,
+    title: service.title,
+    recommendedMileage: service.recommendedMileage,
+    performedAt: service.performedAt,
+    mileage: service.mileage,
     laborCost: service.laborCost == null ? null : toNumber(service.laborCost),
-    items: service.items?.map((item) => ({
-      ...item,
+    cost: service.cost == null ? null : toNumber(service.cost),
+    workshop: service.workshop,
+    category: service.category,
+    notes: service.notes,
+    createdAt: service.createdAt,
+    updatedAt: service.updatedAt,
+    items: service.items.map((item) => ({
+      id: item.id,
+      serviceId: item.serviceId,
+      name: item.name,
+      quantity: item.quantity,
       price: toNumber(item.price),
+      position: item.position,
+      createdAt: item.createdAt,
     })),
   };
 }
@@ -155,7 +177,8 @@ export async function listServices(req: Request, res: Response, next: NextFuncti
       return max == null || record.mileage > max ? record.mileage : max;
     }, null);
 
-    res.json({ services, totalCost, latestMileage });
+    const body: ServiceListResponse = { services, totalCost, latestMileage };
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -194,7 +217,8 @@ export async function createService(req: Request, res: Response, next: NextFunct
       include: { items: { orderBy: { position: 'asc' } } },
     });
 
-    res.status(201).json({ service: serializeService(service) });
+    const body: ServiceDetailsResponse = { service: serializeService(service) };
+    res.status(201).json(body);
   } catch (err) {
     next(err);
   }
@@ -215,7 +239,8 @@ export async function getService(req: Request, res: Response, next: NextFunction
       throw new HttpError(404, 'Service record not found');
     }
 
-    res.json({ service: serializeService(service) });
+    const body: ServiceDetailsResponse = { service: serializeService(service) };
+    res.json(body);
   } catch (err) {
     next(err);
   }
@@ -263,7 +288,8 @@ export async function updateService(req: Request, res: Response, next: NextFunct
       data,
     });
 
-    res.json({ service });
+    const body: ServiceResponse = { service };
+    res.json(body);
   } catch (err) {
     next(err);
   }
