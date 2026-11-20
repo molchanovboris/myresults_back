@@ -1,12 +1,13 @@
 import fs from 'fs/promises';
 
+import type { Car } from '@prisma/client';
 import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 
 import { fetchStockCarImage } from '../lib/carimage';
 import { createId } from '../lib/id';
 import { prisma } from '../lib/prisma';
-import type { CarDetailsResponse, CarListResponse, CarPhotoResponse, CarResponse } from '../types';
+import type { CarDetailsResponse, CarImageResponse, CarListResponse, CarResponse, PublicCar } from '../types';
 import { carUploadsDir, ensureDir, photoAbsolutePath, photoPublicUrl } from '../lib/uploads';
 import { HttpError } from '../middleware/error';
 
@@ -29,13 +30,55 @@ const updateCarSchema = z
   })
   .strict();
 
+function publicCar(car: Car): PublicCar {
+  const { imageFilename: _imageFilename, ...rest } = car;
+  return rest;
+}
+
+function imageResponse(car: Pick<Car, 'id' | 'imageFilename'>): CarImageResponse | null {
+  return car.imageFilename ? { url: photoPublicUrl(car.id, car.imageFilename) } : null;
+}
+
+async function saveCarImage(car: {
+  id: string;
+  make: string;
+  model: string;
+  year: number | null;
+  color: string | null;
+  imageFilename: string | null;
+}): Promise<CarImageResponse | null> {
+  if (car.year == null) return null;
+
+  const stock = await fetchStockCarImage({
+    make: car.make,
+    model: car.model,
+    year: car.year,
+    color: car.color,
+  });
+  if (!stock) return null;
+
+  const filename = `${createId()}${stock.extension}`;
+  ensureDir(carUploadsDir(car.id));
+  await fs.writeFile(photoAbsolutePath(car.id, filename), stock.buffer);
+  await prisma.car.update({
+    where: { id: car.id },
+    data: { imageFilename: filename },
+  });
+
+  if (car.imageFilename && car.imageFilename !== filename) {
+    await fs.unlink(photoAbsolutePath(car.id, car.imageFilename)).catch(() => undefined);
+  }
+
+  return { url: photoPublicUrl(car.id, filename) };
+}
+
 export async function listCars(req: Request, res: Response, next: NextFunction) {
   try {
     const cars = await prisma.car.findMany({
       where: { userId: req.user!.id },
       orderBy: { createdAt: 'desc' },
     });
-    const body: CarListResponse = { cars };
+    const body: CarListResponse = { cars: cars.map(publicCar) };
     res.json(body);
   } catch (err) {
     next(err);
@@ -58,49 +101,9 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
       },
     });
 
-    let photos: CarPhotoResponse[] = [];
-
-    if (car.year != null) {
-      const stock = await fetchStockCarImage({
-        make: car.make,
-        model: car.model,
-        year: car.year,
-        color: car.color,
-      });
-
-      if (stock) {
-        const filename = `${createId()}${stock.extension}`;
-        ensureDir(carUploadsDir(car.id));
-        await fs.writeFile(photoAbsolutePath(car.id, filename), stock.buffer);
-
-        const photo = await prisma.carPhoto.create({
-          data: {
-            carId: car.id,
-            filename,
-            originalName: `${car.year}-${car.make}-${car.model}${stock.extension}`,
-            mimeType: stock.mimeType,
-            size: stock.buffer.length,
-            caption: 'Stock preview',
-          },
-        });
-
-        photos = [
-          {
-            id: photo.id,
-            carId: photo.carId,
-            caption: photo.caption,
-            mimeType: photo.mimeType,
-            size: photo.size,
-            originalName: photo.originalName,
-            url: photoPublicUrl(photo.carId, photo.filename),
-            createdAt: photo.createdAt,
-            updatedAt: photo.updatedAt,
-          },
-        ];
-      }
-    }
-
-    const body: CarDetailsResponse = { car, photos };
+    const image = await saveCarImage(car);
+    const stored = await prisma.car.findUniqueOrThrow({ where: { id: car.id } });
+    const body: CarDetailsResponse = { car: publicCar(stored), image };
     res.status(201).json(body);
   } catch (err) {
     next(err);
@@ -110,32 +113,17 @@ export async function createCar(req: Request, res: Response, next: NextFunction)
 export async function getCar(req: Request, res: Response, next: NextFunction) {
   try {
     const id = z.string().min(1).parse(req.params.id);
-    const found = await prisma.car.findFirst({
+    const car = await prisma.car.findFirst({
       where: { id, userId: req.user!.id },
-      include: {
-        photos: { orderBy: { createdAt: 'desc' } },
-      },
     });
 
-    if (!found) {
+    if (!car) {
       throw new HttpError(404, 'Car not found');
     }
 
-    const { photos, ...car } = found;
-
     const body: CarDetailsResponse = {
-      car,
-      photos: photos.map((photo) => ({
-        id: photo.id,
-        carId: photo.carId,
-        caption: photo.caption,
-        mimeType: photo.mimeType,
-        size: photo.size,
-        originalName: photo.originalName,
-        url: photoPublicUrl(photo.carId, photo.filename),
-        createdAt: photo.createdAt,
-        updatedAt: photo.updatedAt,
-      })),
+      car: publicCar(car),
+      image: imageResponse(car),
     };
     res.json(body);
   } catch (err) {
@@ -168,7 +156,9 @@ export async function updateCar(req: Request, res: Response, next: NextFunction)
       data,
     });
 
-    const body: CarResponse = { car };
+    const colorChanged = data.color !== undefined && data.color !== existing.color;
+    const image = colorChanged ? await saveCarImage(car) : undefined;
+    const body: CarResponse = image ? { car: publicCar(car), image } : { car: publicCar(car) };
     res.json(body);
   } catch (err) {
     next(err);

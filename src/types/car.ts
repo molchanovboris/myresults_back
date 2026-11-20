@@ -1,18 +1,21 @@
-import type { Car, CarPhoto } from '@prisma/client';
+import type { Car } from '@prisma/client';
 
-export type CarPhotoResponse = Omit<CarPhoto, 'filename'> & {
+export type PublicCar = Omit<Car, 'imageFilename'>;
+
+export type CarImageResponse = {
   url: string;
 };
 
 export type CarListResponse = {
-  cars: Car[];
+  cars: PublicCar[];
 };
 
 export type CarDetailsResponse = {
-  car: Car;
-  photos: CarPhotoResponse[];
+  car: PublicCar;
+  image: CarImageResponse | null;
 };
 
 export type CarResponse = {
-  car: Car;
+  car: PublicCar;
+  image?: CarImageResponse | null;
 };

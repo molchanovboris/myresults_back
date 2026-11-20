@@ -43,7 +43,8 @@ model Car {
   year      Int?
   color     String?
   nickname  String?
-  mileage   Int?
+  mileage       Int?
+  imageFilename String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -54,22 +55,16 @@ model Car {
   @@index([userId])
 }
 
-enum CarPhotoSource {
-  stock
-  upload
-}
-
 model CarPhoto {
-  id           String         @id @default(cuid())
+  id           String   @id @default(cuid())
   carId        String
-  car          Car            @relation(fields: [carId], references: [id], onDelete: Cascade)
+  car          Car      @relation(fields: [carId], references: [id], onDelete: Cascade)
 
   filename     String
   originalName String?
   mimeType     String
   size         Int
   caption      String?
-  source       CarPhotoSource @default(upload)
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

@@ -1,4 +1,4 @@
-export type { CarDetailsResponse, CarListResponse, CarPhotoResponse, CarResponse } from './car';
+export type { CarDetailsResponse, CarImageResponse, CarListResponse, CarResponse, PublicCar } from './car';
 export type {
   ServiceDetailsResponse,
   ServiceItemResponse,
