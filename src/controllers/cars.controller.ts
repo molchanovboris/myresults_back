@@ -19,7 +19,14 @@ const createCarSchema = z.object({
   mileage: z.coerce.number().int().min(0),
 });
 
-const updateCarSchema = createCarSchema.partial();
+const updateCarSchema = z
+  .object({
+    year: z.coerce.number().int().min(1900).max(2100).optional(),
+    color: z.union([z.string().trim().min(1), z.null()]).optional(),
+    nickname: z.union([z.string().trim().min(1), z.null()]).optional(),
+    mileage: z.coerce.number().int().min(0).optional(),
+  })
+  .strict();
 
 export async function listCars(req: Request, res: Response, next: NextFunction) {
   try {
@@ -154,12 +161,17 @@ export async function updateCar(req: Request, res: Response, next: NextFunction)
       throw new HttpError(404, 'Car not found');
     }
 
+    if (
+      data.mileage != null &&
+      existing.mileage != null &&
+      data.mileage < existing.mileage
+    ) {
+      throw new HttpError(400, 'Mileage cannot be less than the current value');
+    }
+
     const car = await prisma.car.update({
       where: { id: existing.id },
-      data: {
-        ...data,
-        vin: data.vin?.toUpperCase(),
-      },
+      data,
     });
 
     res.json({ car });
