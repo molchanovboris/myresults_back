@@ -31,6 +31,7 @@ function serializePhoto(photo: {
   mimeType: string;
   size: number;
   caption: string | null;
+  source: 'stock' | 'upload';
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -41,6 +42,7 @@ function serializePhoto(photo: {
     mimeType: photo.mimeType,
     size: photo.size,
     originalName: photo.originalName,
+    source: photo.source,
     url: photoPublicUrl(photo.carId, photo.filename),
     createdAt: photo.createdAt,
     updatedAt: photo.updatedAt,
@@ -53,7 +55,7 @@ export async function listPhotos(req: Request, res: Response, next: NextFunction
     await getOwnedCar(carId, req.user!.id);
 
     const photos = await prisma.carPhoto.findMany({
-      where: { carId },
+      where: { carId, source: 'upload' },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -102,7 +104,7 @@ export async function getPhoto(req: Request, res: Response, next: NextFunction) 
     await getOwnedCar(carId, req.user!.id);
 
     const photo = await prisma.carPhoto.findFirst({
-      where: { id: photoId, carId },
+      where: { id: photoId, carId, source: 'upload' },
     });
 
     if (!photo) {
@@ -122,7 +124,7 @@ export async function updatePhoto(req: Request, res: Response, next: NextFunctio
     await getOwnedCar(carId, req.user!.id);
 
     const existing = await prisma.carPhoto.findFirst({
-      where: { id: photoId, carId },
+      where: { id: photoId, carId, source: 'upload' },
     });
 
     if (!existing) {
@@ -151,7 +153,7 @@ export async function deletePhoto(req: Request, res: Response, next: NextFunctio
     await getOwnedCar(carId, req.user!.id);
 
     const existing = await prisma.carPhoto.findFirst({
-      where: { id: photoId, carId },
+      where: { id: photoId, carId, source: 'upload' },
     });
 
     if (!existing) {
