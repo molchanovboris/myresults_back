@@ -104,10 +104,26 @@ model ServiceRecord {
   updatedAt            DateTime      @updatedAt
 
   items                ServiceItem[]
+  invoices             ServiceInvoice[]
 
   @@index([carId])
   @@index([carId, status])
   @@index([carId, performedAt])
+}
+
+model ServiceInvoice {
+  id           String        @id @default(cuid())
+  serviceId    String
+  service      ServiceRecord @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  filename     String
+  originalName String?
+  mimeType     String
+  size         Int
+
+  createdAt    DateTime      @default(now())
+
+  @@index([serviceId])
 }
 
 model ServiceItem {

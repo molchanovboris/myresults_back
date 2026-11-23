@@ -1,11 +1,14 @@
-import type { ServiceItem, ServiceRecord } from '@prisma/client';
+import type { ServiceInvoice, ServiceItem, ServiceRecord } from '@prisma/client';
 import { NextFunction, Request, Response } from 'express';
+import fs from 'fs/promises';
 import { z } from 'zod';
 
 import { prisma } from '../lib/prisma';
+import { serviceInvoiceAbsolutePath, serviceInvoicePublicUrl } from '../lib/uploads';
 import { HttpError } from '../middleware/error';
 import type {
   ServiceDetailsResponse,
+  ServiceInvoiceResponse,
   ServiceListResponse,
   ServiceRecordResponse,
   ServiceResponse,
@@ -85,7 +88,26 @@ const listQuerySchema = z.object({
   status: z.enum(['planned', 'completed', 'all']).default('all'),
 });
 
-function serializeService(service: ServiceRecord & { items: ServiceItem[] }): ServiceRecordResponse {
+export function serializeInvoice(carId: string, invoice: ServiceInvoice): ServiceInvoiceResponse {
+  return {
+    id: invoice.id,
+    serviceId: invoice.serviceId,
+    url: serviceInvoicePublicUrl(carId, invoice.serviceId, invoice.filename),
+    mimeType: invoice.mimeType,
+    size: invoice.size,
+    originalName: invoice.originalName,
+    createdAt: invoice.createdAt,
+  };
+}
+
+const serviceInclude = {
+  items: { orderBy: { position: 'asc' as const } },
+  invoices: { orderBy: { createdAt: 'asc' as const } },
+};
+
+function serializeService(
+  service: ServiceRecord & { items: ServiceItem[]; invoices: ServiceInvoice[] },
+): ServiceRecordResponse {
   return {
     id: service.id,
     carId: service.carId,
@@ -111,6 +133,7 @@ function serializeService(service: ServiceRecord & { items: ServiceItem[] }): Se
       position: item.position,
       createdAt: item.createdAt,
     })),
+    invoices: service.invoices.map((invoice) => serializeInvoice(service.carId, invoice)),
   };
 }
 
@@ -214,7 +237,7 @@ export async function createService(req: Request, res: Response, next: NextFunct
         notes: data.kind === 'repair' ? data.repair : undefined,
         items: { create: items },
       },
-      include: { items: { orderBy: { position: 'asc' } } },
+      include: serviceInclude,
     });
 
     const body: ServiceDetailsResponse = { service: serializeService(service) };
@@ -232,7 +255,7 @@ export async function getService(req: Request, res: Response, next: NextFunction
 
     const service = await prisma.serviceRecord.findFirst({
       where: { id: serviceId, carId },
-      include: { items: { orderBy: { position: 'asc' } } },
+      include: serviceInclude,
     });
 
     if (!service) {
@@ -309,7 +332,96 @@ export async function deleteService(req: Request, res: Response, next: NextFunct
       throw new HttpError(404, 'Service record not found');
     }
 
+    const invoices = await prisma.serviceInvoice.findMany({ where: { serviceId: existing.id } });
     await prisma.serviceRecord.delete({ where: { id: existing.id } });
+    await Promise.all(
+      invoices.map((invoice) =>
+        fs.unlink(serviceInvoiceAbsolutePath(carId, existing.id, invoice.filename)).catch(() => undefined),
+      ),
+    );
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+const MAX_SERVICE_INVOICES = 2;
+
+async function removeUploadedInvoice(carId: string, serviceId: string, filename: string | undefined) {
+  if (!filename) return;
+  await fs.unlink(serviceInvoiceAbsolutePath(carId, serviceId, filename)).catch(() => undefined);
+}
+
+export async function createServiceInvoice(req: Request, res: Response, next: NextFunction) {
+  const carId = typeof req.params.carId === 'string' ? req.params.carId : '';
+  const serviceId = typeof req.params.serviceId === 'string' ? req.params.serviceId : '';
+
+  try {
+    await getOwnedCar(carId, req.user!.id);
+
+    const file = req.file;
+    if (!file) {
+      throw new HttpError(400, 'Photo file is required (multipart field "photo")');
+    }
+
+    const service = await prisma.serviceRecord.findFirst({
+      where: { id: serviceId, carId },
+    });
+
+    if (!service) {
+      await removeUploadedInvoice(carId, serviceId, file.filename);
+      throw new HttpError(404, 'Service record not found');
+    }
+
+    const count = await prisma.serviceInvoice.count({ where: { serviceId: service.id } });
+    if (count >= MAX_SERVICE_INVOICES) {
+      await removeUploadedInvoice(carId, serviceId, file.filename);
+      throw new HttpError(400, 'A service can have at most 2 invoice photos');
+    }
+
+    const invoice = await prisma.serviceInvoice.create({
+      data: {
+        serviceId: service.id,
+        filename: file.filename,
+        originalName: file.originalname || null,
+        mimeType: file.mimetype,
+        size: file.size,
+      },
+    });
+
+    const saved = await prisma.serviceInvoice.findMany({
+      where: { serviceId: service.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    if (saved.length > MAX_SERVICE_INVOICES && !saved.slice(0, MAX_SERVICE_INVOICES).some((item) => item.id === invoice.id)) {
+      await prisma.serviceInvoice.delete({ where: { id: invoice.id } });
+      await removeUploadedInvoice(carId, serviceId, file.filename);
+      throw new HttpError(400, 'A service can have at most 2 invoice photos');
+    }
+
+    res.status(201).json({ invoice: serializeInvoice(carId, invoice) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteServiceInvoice(req: Request, res: Response, next: NextFunction) {
+  try {
+    const carId = z.string().min(1).parse(req.params.carId);
+    const serviceId = z.string().min(1).parse(req.params.serviceId);
+    const invoiceId = z.string().min(1).parse(req.params.invoiceId);
+    await getOwnedCar(carId, req.user!.id);
+
+    const invoice = await prisma.serviceInvoice.findFirst({
+      where: { id: invoiceId, serviceId, service: { carId } },
+    });
+
+    if (!invoice) {
+      throw new HttpError(404, 'Invoice photo not found');
+    }
+
+    await prisma.serviceInvoice.delete({ where: { id: invoice.id } });
+    await fs.unlink(serviceInvoiceAbsolutePath(carId, serviceId, invoice.filename)).catch(() => undefined);
     res.status(204).send();
   } catch (err) {
     next(err);
