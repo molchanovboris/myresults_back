@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { adviseCar } from '../controllers/advice.controller';
 import { createCar, deleteCar, getCar, listCars, updateCar } from '../controllers/cars.controller';
 import { requireAuth } from '../middleware/auth';
 import { photosRouter } from './photos.router';
@@ -11,6 +12,7 @@ carsRouter.use(requireAuth);
 carsRouter.get('/', listCars);
 carsRouter.post('/', createCar);
 carsRouter.use('/:carId/services', servicesRouter);
+carsRouter.post('/:carId/advice', adviseCar);
 carsRouter.use('/:carId/photos', photosRouter);
 carsRouter.get('/:id', getCar);
 carsRouter.patch('/:id', updateCar);

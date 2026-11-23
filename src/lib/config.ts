@@ -13,5 +13,7 @@ export const config = {
   mailFrom: process.env.MAIL_FROM ?? 'My Results <noreply@example.com>',
   autoDevApiKey: process.env.AUTODEV_API_KEY ?? '',
   carImageApiKey: process.env.CAR_IMAGE_API_KEY ?? '',
+  groqApiKey: process.env.GROQ_API_KEY ?? '',
+  groqModel: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
   uploadsDir: process.env.UPLOADS_DIR ?? path.join(process.cwd(), 'uploads'),
 };
